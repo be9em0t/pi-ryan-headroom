@@ -283,6 +283,7 @@ export default function memoryLayerExtension(pi: ExtensionAPI) {
 		scope: MemoryScope,
 		ctx: ExtensionContext,
 		interactive = true,
+		topic?: string,
 	): Promise<{ topic: string; title: string; scope: MemoryScope } | { cancelled: true } | { error: string }> {
 		try {
 			const displayTitle = title ?? truncateTitle(content);
@@ -304,9 +305,19 @@ export default function memoryLayerExtension(pi: ExtensionAPI) {
 				topicSlug = topicChoice.slug;
 				topicHeading = topicChoice.heading;
 			} else {
-				// remember tool path: auto-select "general" — NO UI prompts
-				topicSlug = "general";
-				topicHeading = "General";
+				// remember tool path: use caller-supplied topic when present, else fall back to "general".
+				const requested = topic?.trim();
+				if (requested) {
+					try {
+						topicSlug = normalizeTopicInput(requested);
+					} catch {
+						return { error: `Invalid topic: ${requested}` };
+					}
+					topicHeading = slugToHeading(topicSlug);
+				} else {
+					topicSlug = "general";
+					topicHeading = "General";
+				}
 			}
 
 			await saveMemory(
@@ -499,13 +510,18 @@ export default function memoryLayerExtension(pi: ExtensionAPI) {
 			"Defaults to 'project' when ambiguous.",
 		parameters: RememberParams,
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			const { content, title, scope } = params as { content: string; title?: string; scope: MemoryScope };
+			const { content, title, scope, topic } = params as {
+				content: string;
+				title?: string;
+				scope: MemoryScope;
+				topic?: string;
+			};
 
 			if (!content?.trim()) {
 				throw new Error("content가 비어 있습니다.");
 			}
 
-			const result = await saveContent(content, title, scope, ctx, false);
+			const result = await saveContent(content, title, scope, ctx, false, topic);
 
 			if ("cancelled" in result) {
 				return { content: [{ type: "text" as const, text: "사용자가 기억 저장을 취소했습니다." }], details: undefined };

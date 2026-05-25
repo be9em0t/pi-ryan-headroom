@@ -45,5 +45,7 @@ export async function buildMemoryPrompt(projectId?: string): Promise<string | nu
 		"[Memory Layer]",
 		lines.join("\n"),
 		"상세 내용은 recall({ query })로 검색 후, 결과의 ID로 recall({ id })를 호출하면 볼 수 있습니다.",
+		"새 메모리를 저장할 때는 가능하면 위 인덱스의 기존 토픽(`## xxx.md`)을 remember({ topic: 'xxx' })으로 재사용하세요. " +
+			"성격이 명확히 다른 내용일 때만 새 토픽을 만들고, 토픽명은 'coding-rules', 'tooling' 같은 짧은 영문 슬러그를 사용합니다.",
 	].join("\n");
 }

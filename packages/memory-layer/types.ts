@@ -17,6 +17,15 @@ export const RememberParams = Type.Object({
 	}),
 	title: Type.Optional(Type.String({ description: "Short title/summary for the memory (auto-generated if omitted)" })),
 	scope: MemoryScopeSchema,
+	topic: Type.Optional(
+		Type.String({
+			description:
+				"Topic slug to group this memory under (e.g. 'coding-rules', 'tooling', 'domain'). " +
+				"Strongly prefer reusing an existing topic shown in the Memory Layer index; " +
+				"only create a new short english slug when the topic is clearly different. " +
+				"Omit to default to 'general'.",
+		}),
+	),
 });
 
 export const RecallParams = Type.Object({
