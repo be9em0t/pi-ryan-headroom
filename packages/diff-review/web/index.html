@@ -354,14 +354,34 @@
                 position: relative; /* anchor for overlays */
               }
 
-              #editor-container > div,
-              #editor-container .monaco-diff-editor,
-              #editor-container .monaco-editor {
+              #diff-editor-host,
+              #single-editor-host {
+                position: absolute;
+                inset: 0;
+                z-index: 1;
                 height: 100%;
               }
 
-              #editor-container[data-preview-active="true"] .monaco-diff-editor,
-              #editor-container[data-preview-active="true"] .monaco-editor {
+              #single-editor-host {
+                display: none;
+              }
+
+              #editor-container[data-text-editor-mode="single"] #diff-editor-host {
+                display: none;
+              }
+
+              #editor-container[data-text-editor-mode="single"] #single-editor-host {
+                display: block;
+              }
+
+              #diff-editor-host .monaco-diff-editor,
+              #diff-editor-host .monaco-editor,
+              #single-editor-host .monaco-editor {
+                height: 100%;
+              }
+
+              #editor-container[data-preview-active="true"] #diff-editor-host,
+              #editor-container[data-preview-active="true"] #single-editor-host {
                 opacity: 0;
                 pointer-events: none;
               }
@@ -609,7 +629,9 @@
       </div>
     </div>
     <div id="file-comments-container" class="hidden border-b border-review-border bg-[#0d1117] px-4 py-0"></div>
-    <div id="editor-container" class="min-h-0 min-w-0 flex-1">
+    <div id="editor-container" class="min-h-0 min-w-0 flex-1" data-text-editor-mode="diff">
+      <div id="diff-editor-host"></div>
+      <div id="single-editor-host"></div>
       <div id="binary-preview" data-active="false"></div>
       <div id="editor-cover" aria-hidden="true"></div>
     </div>

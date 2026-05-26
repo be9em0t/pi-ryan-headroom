@@ -54,6 +54,8 @@ const currentFileLabelEl = document.getElementById("current-file-label");
 const modeHintEl = document.getElementById("mode-hint");
 const fileCommentsContainer = document.getElementById("file-comments-container");
 const editorContainerEl = document.getElementById("editor-container");
+const diffEditorHostEl = document.getElementById("diff-editor-host");
+const singleEditorHostEl = document.getElementById("single-editor-host");
 const refreshReviewButton = document.getElementById("refresh-review-button");
 const submitButton = document.getElementById("submit-button");
 const cancelButton = document.getElementById("cancel-button");
@@ -82,11 +84,14 @@ windowTitleEl.textContent = "Review";
 
 let monacoApi = null;
 let diffEditor = null;
+let singleEditor = null;
 let originalModel = null;
 let modifiedModel = null;
+let singleModel = null;
 let pendingDiffReveal = null; // { dispose: Disposable, timeoutId: number }
 let originalDecorations = [];
 let modifiedDecorations = [];
+let singleDecorations = [];
 let activeViewZones = [];
 let editorResizeObserver = null;
 let requestSequence = 0;
@@ -334,6 +339,16 @@ function activeFileShowsDiff() {
 	if (comparison == null) return false;
 	if (isAddedOnlyComparison(comparison)) return false;
 	return true;
+}
+
+function activeFileUsesSingleEditor() {
+	const file = activeFile();
+	return file != null && file.kind === "text" && activeFileIsAddedOnly();
+}
+
+function setTextEditorMode(mode) {
+	if (!editorContainerEl) return;
+	editorContainerEl.dataset.textEditorMode = mode;
 }
 
 function activeFileUsesBinaryPreview() {
@@ -1018,11 +1033,18 @@ function updateToggleButtons() {
 }
 
 function applyEditorOptions() {
-	if (!diffEditor) return;
 	const addedOnly = activeFileIsAddedOnly();
 	const showDiff = activeFileShowsDiff();
 	const wrapMode = state.wrapLines ? "on" : "off";
 	editorContainerEl.dataset.addedOnly = addedOnly ? "true" : "false";
+	if (singleEditor) {
+		singleEditor.updateOptions({
+			wordWrap: wrapMode,
+			wordWrapOverride1: wrapMode,
+			wordWrapOverride2: wrapMode,
+		});
+	}
+	if (!diffEditor) return;
 	// Why both `wordWrap` and `wordWrapOverride1/2`:
 	// Monaco's diff editor internally applies `wordWrapOverride1` (and sometimes
 	// `wordWrapOverride2`) on the original/modified sides to enforce diff-specific
@@ -1209,23 +1231,27 @@ function showFileCommentPopover() {
 }
 
 function layoutEditor() {
-	if (!diffEditor) return;
 	const width = editorContainerEl.clientWidth;
 	const height = editorContainerEl.clientHeight;
 	if (width <= 0 || height <= 0) return;
-	diffEditor.layout({ width, height });
+	if (diffEditor) diffEditor.layout({ width, height });
+	if (singleEditor) singleEditor.layout({ width, height });
 }
 
 function clearViewZones() {
-	if (!diffEditor || activeViewZones.length === 0) return;
-	const original = diffEditor.getOriginalEditor();
-	const modified = diffEditor.getModifiedEditor();
-	original.changeViewZones((accessor) => {
-		for (const zone of activeViewZones) if (zone.editor === original) accessor.removeZone(zone.id);
-	});
-	modified.changeViewZones((accessor) => {
-		for (const zone of activeViewZones) if (zone.editor === modified) accessor.removeZone(zone.id);
-	});
+	if (activeViewZones.length === 0) return;
+	const zonesByEditor = new Map();
+	for (const zone of activeViewZones) {
+		if (!zone.editor) continue;
+		const zones = zonesByEditor.get(zone.editor) ?? [];
+		zones.push(zone.id);
+		zonesByEditor.set(zone.editor, zones);
+	}
+	for (const [editor, zoneIds] of zonesByEditor.entries()) {
+		editor.changeViewZones((accessor) => {
+			for (const id of zoneIds) accessor.removeZone(id);
+		});
+	}
 	activeViewZones = [];
 }
 
@@ -1272,18 +1298,22 @@ function isActiveFileReady() {
 
 function syncViewZones() {
 	clearViewZones();
-	if (!diffEditor || !isActiveFileReady()) return;
+	if (!isActiveFileReady()) return;
 	const file = activeFile();
 	if (!file) return;
 
-	const originalEditor = diffEditor.getOriginalEditor();
-	const modifiedEditor = diffEditor.getModifiedEditor();
+	const usingSingleEditor = activeFileUsesSingleEditor();
+	const originalEditor = usingSingleEditor ? null : diffEditor?.getOriginalEditor?.();
+	const modifiedEditor = usingSingleEditor ? singleEditor : diffEditor?.getModifiedEditor?.();
+	if (!modifiedEditor || (!usingSingleEditor && !originalEditor)) return;
+
 	const inlineComments = state.comments.filter(
 		(comment) => comment.fileId === file.id && comment.scope === state.currentScope && comment.side !== "file",
 	);
 
 	inlineComments.forEach((item) => {
 		const editor = item.side === "original" ? originalEditor : modifiedEditor;
+		if (!editor) return;
 		const domNode = renderCommentDOM(item, () => {
 			state.comments = state.comments.filter((comment) => comment.id !== item.id);
 			updateCommentsUI();
@@ -1302,7 +1332,7 @@ function syncViewZones() {
 }
 
 function updateDecorations() {
-	if (!diffEditor || !monacoApi) return;
+	if (!monacoApi) return;
 	const file = activeFile();
 	const comments = file
 		? state.comments.filter(
@@ -1326,8 +1356,15 @@ function updateDecorations() {
 		else modifiedRanges.push(range);
 	}
 
-	originalDecorations = diffEditor.getOriginalEditor().deltaDecorations(originalDecorations, originalRanges);
-	modifiedDecorations = diffEditor.getModifiedEditor().deltaDecorations(modifiedDecorations, modifiedRanges);
+	if (diffEditor) {
+		originalDecorations = diffEditor.getOriginalEditor().deltaDecorations(originalDecorations, originalRanges);
+		modifiedDecorations = diffEditor
+			.getModifiedEditor()
+			.deltaDecorations(modifiedDecorations, activeFileUsesSingleEditor() ? [] : modifiedRanges);
+	}
+	singleDecorations = singleEditor
+		? singleEditor.deltaDecorations(singleDecorations, activeFileUsesSingleEditor() ? modifiedRanges : [])
+		: [];
 }
 
 function renderFileComments() {
@@ -1507,15 +1544,23 @@ function revealEditorNow() {
 }
 
 function mountFile(options = {}) {
-	if (!diffEditor || !monacoApi) return;
+	if (!diffEditor || !singleEditor || !monacoApi) return;
 	const file = activeFile();
 	if (!file) {
 		hideBinaryPreview();
+		setTextEditorMode("diff");
 		currentFileLabelEl.textContent = "No file selected";
 		updateFileHeaderMeta(null);
 		clearViewZones();
+		if (singleModel) {
+			singleEditor.setModel(null);
+			singleModel.dispose();
+			singleModel = null;
+		}
 		if (originalModel) originalModel.dispose();
 		if (modifiedModel) modifiedModel.dispose();
+		originalModel = null;
+		modifiedModel = null;
 		originalModel = monacoApi.editor.createModel("", "plaintext");
 		modifiedModel = monacoApi.editor.createModel("", "plaintext");
 		// Apply options BEFORE setModel so Monaco renders the first frame with the
@@ -1556,9 +1601,41 @@ function mountFile(options = {}) {
 	hideBinaryPreview();
 	if (originalModel) originalModel.dispose();
 	if (modifiedModel) modifiedModel.dispose();
+	originalModel = null;
+	modifiedModel = null;
 
-	const originalText = activeFileIsAddedOnly() ? contents.modifiedContent : contents.originalContent;
-	originalModel = monacoApi.editor.createModel(originalText, language);
+	if (activeFileUsesSingleEditor()) {
+		cancelPendingReveal();
+		setTextEditorMode("single");
+		if (singleModel) {
+			singleEditor.setModel(null);
+			singleModel.dispose();
+		}
+		singleModel = monacoApi.editor.createModel(contents.modifiedContent, language);
+		singleEditor.setModel(singleModel);
+		applyEditorOptions();
+		hideEditorForMount();
+		syncViewZones();
+		updateDecorations();
+		renderFileComments();
+		requestAnimationFrame(() => {
+			layoutEditor();
+			requestAnimationFrame(() => {
+				layoutEditor();
+				revealEditorNow();
+			});
+		});
+		return;
+	}
+
+	setTextEditorMode("diff");
+	if (singleModel) {
+		singleEditor.setModel(null);
+		singleModel.dispose();
+		singleModel = null;
+	}
+
+	originalModel = monacoApi.editor.createModel(contents.originalContent, language);
 	modifiedModel = monacoApi.editor.createModel(contents.modifiedContent, language);
 
 	// Apply options BEFORE setModel. Otherwise Monaco first renders the new diff
@@ -1637,7 +1714,7 @@ function renderAll(options = {}) {
 	renderTree();
 	renderCommitList();
 	submitButton.disabled = false;
-	if (diffEditor && monacoApi) {
+	if (diffEditor && singleEditor && monacoApi) {
 		mountFile(options);
 		requestAnimationFrame(() => {
 			layoutEditor();
@@ -1649,8 +1726,7 @@ function renderAll(options = {}) {
 }
 
 function getFocusedTextEditor() {
-	if (!diffEditor) return null;
-	const editors = [diffEditor.getModifiedEditor(), diffEditor.getOriginalEditor()];
+	const editors = [singleEditor, diffEditor?.getModifiedEditor?.(), diffEditor?.getOriginalEditor?.()].filter(Boolean);
 	return editors.find((editor) => editor?.hasTextFocus?.() || editor?.hasWidgetFocus?.()) ?? null;
 }
 
@@ -1900,7 +1976,7 @@ function setupMonaco() {
 		});
 		monacoApi.editor.setTheme("review-dark");
 
-		diffEditor = monacoApi.editor.createDiffEditor(editorContainerEl, {
+		diffEditor = monacoApi.editor.createDiffEditor(diffEditorHostEl, {
 			automaticLayout: true,
 			renderSideBySide: activeFileShowsDiff(),
 			readOnly: true,
@@ -1921,8 +1997,24 @@ function setupMonaco() {
 			wordWrap: "on",
 		});
 
+		singleEditor = monacoApi.editor.create(singleEditorHostEl, {
+			automaticLayout: true,
+			readOnly: true,
+			minimap: { enabled: false },
+			renderOverviewRuler: false,
+			overviewRulerLanes: 0,
+			scrollBeyondLastLine: false,
+			lineNumbersMinChars: 4,
+			glyphMargin: true,
+			folding: true,
+			lineDecorationsWidth: 10,
+			overviewRulerBorder: false,
+			wordWrap: state.wrapLines ? "on" : "off",
+		});
+
 		createGlyphHoverActions(diffEditor.getOriginalEditor(), "original");
 		createGlyphHoverActions(diffEditor.getModifiedEditor(), "modified");
+		createGlyphHoverActions(singleEditor, "modified");
 
 		if (typeof ResizeObserver !== "undefined") {
 			editorResizeObserver = new ResizeObserver(() => {
