@@ -43,17 +43,26 @@ The footer shows a compact status (`✓ Headroom -42% (12,345 saved)`) once comp
 
 ## Configuration
 
-All settings are environment variables read at startup:
+Settings are read at startup from `~/.pi/agent/headroom/settings.json`. Values in this file override environment variables; environment variables remain supported as fallbacks.
 
-| Variable | Default | Description |
-| --- | --- | --- |
-| `PI_HEADROOM_ENABLED` | `true` | Enable compression on start. |
-| `PI_HEADROOM_URL` | `http://127.0.0.1:8788` | Proxy base URL (`HEADROOM_URL` / `HEADROOM_BASE_URL` also accepted). |
-| `PI_HEADROOM_ALLOW_REMOTE` | `false` | Allow non-local proxy URLs. |
-| `PI_HEADROOM_AUTO_START` | `true` | Auto-start a local persistent proxy when offline. |
-| `PI_HEADROOM_COMMAND` | `headroom` | Command used to launch the proxy. |
-| `PI_HEADROOM_MIN_CONTEXT_TOKENS` | `20000` | Skip compression below this context token count. |
-| `PI_HEADROOM_MIN_MESSAGE_CHARS` | `2000` | Only compress tool results at or above this size. |
-| `PI_HEADROOM_TIMEOUT_MS` | `15000` | HTTP timeout for proxy requests. |
+Example:
 
-Boolean values accept `1/0`, `true/false`, `yes/no`, `on/off`.
+```json
+{
+  "minContextTokens": 10000,
+  "minMessageChars": 1000
+}
+```
+
+| Setting key | Env fallback | Default | Description |
+| --- | --- | --- | --- |
+| `enabled` | `PI_HEADROOM_ENABLED` | `true` | Enable compression on start. |
+| `baseUrl` (`url` also accepted) | `PI_HEADROOM_URL` (`HEADROOM_URL` / `HEADROOM_BASE_URL` also accepted) | `http://127.0.0.1:8788` | Proxy base URL. |
+| `allowRemote` | `PI_HEADROOM_ALLOW_REMOTE` | `false` | Allow non-local proxy URLs. |
+| `autoStart` | `PI_HEADROOM_AUTO_START` | `true` | Auto-start a local persistent proxy when offline. |
+| `command` | `PI_HEADROOM_COMMAND` | `headroom` | Command used to launch the proxy. |
+| `minContextTokens` | `PI_HEADROOM_MIN_CONTEXT_TOKENS` | `20000` | Skip compression below this context token count. |
+| `minMessageChars` | `PI_HEADROOM_MIN_MESSAGE_CHARS` | `2000` | Only compress tool results at or above this size. |
+| `timeoutMs` | `PI_HEADROOM_TIMEOUT_MS` | `15000` | HTTP timeout for proxy requests. |
+
+Boolean values accept JSON booleans, or strings such as `1/0`, `true/false`, `yes/no`, `on/off`.
