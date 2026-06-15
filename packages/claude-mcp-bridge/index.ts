@@ -1489,7 +1489,7 @@ export default async function claudeMcpBridge(pi: ExtensionAPI) {
 						}
 						return new Text("", 0, 0);
 					}
-					if (!tc || tc.type !== "text") return new Text("", 0, 0);
+					if (tc?.type !== "text") return new Text("", 0, 0);
 					const output = tc.text
 						.trim()
 						.split("\n")
