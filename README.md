@@ -1,109 +1,68 @@
-# pi-extension monorepo
+# @ryan_nookpi/pi-extension-headroom
 
-Standalone pi extensions managed in one repository and published as separate npm packages.
+This extension reclaims context window in pi by compressing large tool results through a [Headroom](https://github.com/headroom-ai/headroom) proxy before each LLM call.
 
-## Structure
+Headroom runs locally, compresses only oversized `toolResult` payloads, and leaves your prompts, assistant turns, and tool-call metadata untouched. Compression is applied only when the proxy is online and the change passes strict alignment guards, so it never silently rewrites your conversation.
 
-```text
-packages/
-  ask-user-question/
-  auto-name/
-  cc-system-prompt/
-  claude-hooks-bridge/
-  claude-mcp-bridge/
-  claude-spinner/
-  clipboard/
-  codex-fast-mode/
-  codex-large-context/
-  cross-agent/
-  delayed-action/
-  diff-review/
-  generative-ui/
-  headroom/
-  idle-screensaver/
-  memory-layer/
-  open-pr/
-  setup-sh/
-  todo-write/
-  todo-write-overlay/
-  until/
-```
-
-## Workspace
-
-This repository uses pnpm workspaces for local management and npm-compatible package manifests for publishing.
-
-## Quality gates
-
-This monorepo uses Biome as the single formatter/linter, Vitest for automated tests, and Lefthook for local Git hooks.
+## Install
 
 ```bash
-pnpm run biome:check
-pnpm run biome:strict
-pnpm run typecheck
-pnpm run test
-pnpm run coverage:check
-pnpm run verify
-pnpm run verify:strict
+pi install npm:@ryan_nookpi/pi-extension-headroom
 ```
 
-- `pnpm run biome:check`: format, lint, and import-order validation with Biome
-- `pnpm run biome:strict`: same as `biome:check`, but fails on warnings via Biome CLI `--error-on-warnings`
-- `pnpm run typecheck`: TypeScript validation with `tsc --noEmit`
-- `pnpm run test`: run all extension tests with Vitest
-- `pnpm run coverage:check`: run Vitest coverage with 100% thresholds and per-file enforcement for the covered package sources
-- `pnpm run verify`: legacy pre-publish gate (`biome + typecheck + test + workspace check`)
-- `pnpm run verify:strict`: strict gate (`biome:strict + typecheck + test + workspace check + coverage:check`)
-
-## Git hooks
-
-`pnpm install` runs the Lefthook `prepare` script (`lefthook install --reset-hooks-path`) and installs local hooks automatically from `lefthook.yml`, clearing an old Husky `core.hooksPath` during migration.
-
-- `pre-commit`: `pnpm run precommit:strict`
-  - `biome check --staged --error-on-warnings`
-  - `pnpm run typecheck`
-  - `pnpm run test`
-- `pre-push`: `pnpm run prepush:strict`
-  - `pnpm run verify:strict`
-
-You can also validate and invoke the configured hooks manually with:
+You also need the Headroom proxy available on your machine:
 
 ```bash
-pnpm exec lefthook validate
-pnpm exec lefthook run pre-commit
-pnpm exec lefthook run pre-push
+pip install "headroom-ai[proxy]"
 ```
 
-Coverage is enforced with Vitest's per-file 100% thresholds for the deterministic source modules listed in `vitest.config.ts`:
+By default the extension auto-starts a local token-mode proxy (`headroom proxy --mode token --no-cache`) on `http://127.0.0.1:8788` and leaves it running after pi exits.
 
-- `packages/auto-name/utils/**/*.ts`
-- `packages/clipboard/index.ts`
-- `packages/codex-fast-mode/index.ts`
-- `packages/generative-ui/{guidelines.ts,html-utils.ts,svg-styles.ts}`
+## How it works
 
-Interactive/runtime-heavy extension entrypoints remain validated by the normal test suite in `pnpm run test`, but are intentionally outside the strict coverage gate.
+- Listens on the `context` event fired before each LLM call.
+- Skips entirely until context usage reaches the configured token threshold.
+- Sends an OpenAI-shaped copy of the conversation to the proxy's `/v1/compress` endpoint.
+- Applies the result only to large `toolResult` messages, preserving pi metadata (`toolName`, `details`, tool-call ids, images).
+- Rejects any response that changes message count, roles, tool-call ids, or non-candidate content.
 
-## Install from npm
+## Privacy
 
-```bash
-pi install npm:@ryan_nookpi/pi-extension-ask-user-question
-pi install npm:@ryan_nookpi/pi-extension-auto-name
-pi install npm:@ryan_nookpi/pi-extension-cc-system-prompt
-pi install npm:@ryan_nookpi/pi-extension-claude-hooks-bridge
-pi install npm:@ryan_nookpi/pi-extension-claude-mcp-bridge
-pi install npm:@ryan_nookpi/pi-extension-claude-spinner
-pi install npm:@ryan_nookpi/pi-extension-clipboard
-pi install npm:@ryan_nookpi/pi-extension-codex-fast-mode
-pi install npm:@ryan_nookpi/pi-extension-codex-large-context
-pi install npm:@ryan_nookpi/pi-extension-cross-agent
-pi install npm:@ryan_nookpi/pi-extension-delayed-action
-pi install npm:@ryan_nookpi/pi-extension-diff-review
-pi install npm:@ryan_nookpi/pi-extension-generative-ui
-pi install npm:@ryan_nookpi/pi-extension-idle-screensaver
-pi install npm:@ryan_nookpi/pi-extension-memory-layer
-pi install npm:@ryan_nookpi/pi-extension-open-pr
-pi install npm:@ryan_nookpi/pi-extension-setup-sh
-pi install npm:@ryan_nookpi/pi-extension-todo-write
-pi install npm:@ryan_nookpi/pi-extension-todo-write-overlay
-pi install npm:@ryan_nookpi/pi-extension-until
+Compression sends conversation context to the proxy, so remote URLs are blocked by default. Only `localhost`/`127.0.0.1`/`::1` are allowed unless you explicitly set `PI_HEADROOM_ALLOW_REMOTE=1` for a proxy you trust.
+
+## Commands
+
+- `/headroom` — show current status and session stats.
+- `/headroom on` — enable compression and ensure the proxy is running.
+- `/headroom off` — disable compression for this session (the proxy keeps running).
+- `/headroom health` — check / start the proxy and report whether it is online.
+- `/headroom stats` — print the proxy's own `/stats` output.
+- `/headroom-health` — shortcut for `/headroom health`.
+
+The footer shows a compact status (`✓ Headroom -42% (12,345 saved)`) once compression is applied.
+
+## Configuration
+
+Settings are read at startup from `~/.pi/agent/headroom/settings.json`. Values in this file override environment variables; environment variables remain supported as fallbacks.
+
+Example:
+
+```json
+{
+  "minContextTokens": 10000,
+  "minMessageChars": 1000
+}
 ```
+
+| Setting key | Env fallback | Default | Description |
+| --- | --- | --- | --- |
+| `enabled` | `PI_HEADROOM_ENABLED` | `true` | Enable compression on start. |
+| `baseUrl` (`url` also accepted) | `PI_HEADROOM_URL` (`HEADROOM_URL` / `HEADROOM_BASE_URL` also accepted) | `http://127.0.0.1:8788` | Proxy base URL. |
+| `allowRemote` | `PI_HEADROOM_ALLOW_REMOTE` | `false` | Allow non-local proxy URLs. |
+| `autoStart` | `PI_HEADROOM_AUTO_START` | `true` | Auto-start a local persistent proxy when offline. |
+| `command` | `PI_HEADROOM_COMMAND` | `headroom` | Command used to launch the proxy. |
+| `minContextTokens` | `PI_HEADROOM_MIN_CONTEXT_TOKENS` | `20000` | Skip compression below this context token count. |
+| `minMessageChars` | `PI_HEADROOM_MIN_MESSAGE_CHARS` | `2000` | Only compress tool results at or above this size. |
+| `timeoutMs` | `PI_HEADROOM_TIMEOUT_MS` | `30000` | HTTP timeout for proxy requests. |
+
+Boolean values accept JSON booleans, or strings such as `1/0`, `true/false`, `yes/no`, `on/off`.

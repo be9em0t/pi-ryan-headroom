@@ -20,23 +20,29 @@ const STANDARD_COMPRESSIBLE_ROLES = new Set(["user", "assistant", "toolResult"])
 
 export function buildCompressionPayload(messages: AgentMessage[], minMessageChars: number): CompressionPayload {
 	const mappings: CompressionMapping[] = [];
-	let candidateCount = 0;
 
 	for (let sourceIndex = 0; sourceIndex < messages.length; sourceIndex++) {
 		const source = messages[sourceIndex] as AnyMessage;
-		const converted = convertMessage(source);
+		if (source.role !== "toolResult") continue;
+
+		const converted = convertToolResultMessage(source);
 		if (!converted) continue;
 
 		const originalText = extractOpenAIText(converted);
-		const applyTo = source.role === "toolResult" && originalText.length >= minMessageChars ? "toolResult" : null;
-		if (applyTo) candidateCount++;
-		mappings.push({ sourceIndex, message: converted, applyTo, originalText });
+		if (originalText.length < minMessageChars) continue;
+
+		mappings.push({
+			sourceIndex,
+			message: converted,
+			applyTo: "toolResult",
+			originalText,
+		});
 	}
 
 	return {
 		messages: mappings.map((mapping) => mapping.message),
 		mappings,
-		candidateCount,
+		candidateCount: mappings.length,
 	};
 }
 

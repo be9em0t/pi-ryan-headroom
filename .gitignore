@@ -1,4 +1,4 @@
 node_modules/
-pnpm-lock.yaml
+*.log
 coverage/
-.DS_Store
+.vitest/
