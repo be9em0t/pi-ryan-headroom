@@ -1,7 +1,7 @@
 {
-	"name": "@ryan_nookpi/pi-extension-headroom",
+	"name": "@be9em0t/pi-ryan-headroom",
 	"version": "0.1.2",
-	"description": "Headroom token compression for pi — compress large tool results via a local Headroom proxy to reclaim context window.",
+	"description": "Patched Headroom token compression extension for Pi — compress large tool results via a local Headroom proxy.",
 	"license": "MIT",
 	"repository": {
 		"type": "git",

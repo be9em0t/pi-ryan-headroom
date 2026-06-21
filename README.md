@@ -1,13 +1,20 @@
-# @ryan_nookpi/pi-extension-headroom
+# @be9em0t/pi-ryan-headroom
 
-This extension reclaims context window in pi by compressing large tool results through a [Headroom](https://github.com/headroom-ai/headroom) proxy before each LLM call.
+Patched local/forked Headroom extension for Pi.
 
-Headroom runs locally, compresses only oversized `toolResult` payloads, and leaves your prompts, assistant turns, and tool-call metadata untouched. Compression is applied only when the proxy is online and the change passes strict alignment guards, so it never silently rewrites your conversation.
+Forked from `@ryan_nookpi/pi-extension-headroom`, originally from:
+`https://github.com/Jonghakseo/pi-extension/tree/main/packages/headroom`
+
+This extension reclaims context window in Pi by compressing large tool results through a [Headroom](https://github.com/headroom-ai/headroom) proxy before each LLM call.
+
+Headroom runs locally, compresses only oversized `toolResult` payloads, and leaves your prompts, assistant turns, and tool-call metadata untouched. This fork only sends compressible `toolResult` messages to Headroom, then reinserts the compressed results while preserving the original Pi conversation structure.
 
 ## Install
 
+Use it as a local Pi extension from:
+
 ```bash
-pi install npm:@ryan_nookpi/pi-extension-headroom
+~/.pi/agent/extensions/pi-ryan-headroom
 ```
 
 You also need the Headroom proxy available on your machine:
@@ -43,14 +50,16 @@ The footer shows a compact status (`✓ Headroom -42% (12,345 saved)`) once comp
 
 ## Configuration
 
-Settings are read at startup from `~/.pi/agent/headroom/settings.json`. Values in this file override environment variables; environment variables remain supported as fallbacks.
+Settings are read at startup from the `headroom` key in `~/.pi/agent/settings.json`. Environment variables remain supported as fallbacks.
 
 Example:
 
 ```json
 {
-  "minContextTokens": 10000,
-  "minMessageChars": 1000
+  "headroom": {
+    "minContextTokens": 10000,
+    "minMessageChars": 1000
+  }
 }
 ```
 

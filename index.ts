@@ -342,17 +342,15 @@ function createStatusPainter(theme: unknown): (color: HeadroomStatusColor, text:
 
 function renderFooterStatus(ctx: ExtensionContext, config: HeadroomConfig, state: HeadroomRuntimeState): string {
 	const paint = createStatusPainter(ctx.ui.theme);
-	if (!state.enabled) return paint("dim", "○ Headroom off");
-	if (isRemoteBlocked(config)) return paint("warning", "⚠") + paint("dim", " Headroom remote blocked");
-	if (state.proxyStarting) return paint("dim", "⏳ Headroom starting");
-	if (state.proxyOnline === false) return paint("dim", "○ Headroom not running");
-	if (state.proxyOnline === null && !state.stats.last) return paint("dim", "○ Headroom idle");
-	if (!state.stats.last) return paint("success", "✓") + paint("dim", " Headroom");
+	if (!state.enabled) return paint("dim", "○ Hdr off");
+	if (isRemoteBlocked(config)) return paint("warning", "⚠") + paint("dim", " Hdr blocked");
+	if (state.proxyStarting) return paint("dim", "⏳ Hdr start");
+	if (state.proxyOnline === false) return paint("dim", "○ Hdr down");
+	if (state.proxyOnline === null && !state.stats.last) return paint("dim", "○ Hdr idle");
+	if (!state.stats.last) return paint("success", "✓") + paint("dim", " Hdr");
 
 	const pct = Math.round((1 - state.stats.last.compressionRatio) * 100);
-	return (
-		paint("success", "✓") + paint("dim", ` Headroom -${pct}% (${state.stats.last.tokensSaved.toLocaleString()} saved)`)
-	);
+	return paint("success", "✓") + paint("dim", ` Hdr -${pct}% ${state.stats.last.tokensSaved.toLocaleString()} ✦`);
 }
 
 async function showProxyStats(

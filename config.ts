@@ -8,8 +8,7 @@ const DEFAULT_MIN_CONTEXT_TOKENS = 20_000;
 const DEFAULT_MIN_MESSAGE_CHARS = 2_000;
 const DEFAULT_TIMEOUT_MS = 30_000;
 
-export const HEADROOM_SETTINGS_DIR = path.join(os.homedir(), ".pi", "agent", "headroom");
-export const HEADROOM_SETTINGS_FILE = path.join(HEADROOM_SETTINGS_DIR, "settings.json");
+export const PI_SETTINGS_FILE = path.join(os.homedir(), ".pi", "agent", "settings.json");
 
 export interface HeadroomSettings {
 	enabled?: boolean | string;
@@ -23,13 +22,11 @@ export interface HeadroomSettings {
 	timeoutMs?: number | string;
 }
 
-export function loadHeadroomSettings(settingsPath: string = HEADROOM_SETTINGS_FILE): HeadroomSettings {
-	try {
-		const raw = fs.readFileSync(settingsPath, "utf-8");
-		const parsed = JSON.parse(raw) as unknown;
-		if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed as HeadroomSettings;
-	} catch {
-		// Missing or invalid settings.json falls back to env/defaults.
+export function loadHeadroomSettings(): HeadroomSettings {
+	const piSettings = readJsonObject(PI_SETTINGS_FILE);
+	const fromPiSettings = piSettings?.headroom;
+	if (fromPiSettings && typeof fromPiSettings === "object" && !Array.isArray(fromPiSettings)) {
+		return fromPiSettings as HeadroomSettings;
 	}
 	return {};
 }
@@ -71,6 +68,17 @@ export function isLocalHeadroomUrl(rawUrl: string): boolean {
 
 export function isRemoteBlocked(config: Pick<HeadroomConfig, "baseUrl" | "allowRemote">): boolean {
 	return !config.allowRemote && !isLocalHeadroomUrl(config.baseUrl);
+}
+
+function readJsonObject(filePath: string): Record<string, unknown> | undefined {
+	try {
+		const raw = fs.readFileSync(filePath, "utf-8");
+		const parsed = JSON.parse(raw) as unknown;
+		if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed as Record<string, unknown>;
+	} catch {
+		// Ignore missing or invalid JSON.
+	}
+	return undefined;
 }
 
 function normalizeBaseUrl(raw: string): string {
