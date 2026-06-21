@@ -22,8 +22,8 @@ export interface HeadroomSettings {
 	timeoutMs?: number | string;
 }
 
-export function loadHeadroomSettings(): HeadroomSettings {
-	const piSettings = readJsonObject(PI_SETTINGS_FILE);
+export function loadHeadroomSettings(settingsFile = PI_SETTINGS_FILE): HeadroomSettings {
+	const piSettings = readJsonObject(settingsFile);
 	const fromPiSettings = piSettings?.headroom;
 	if (fromPiSettings && typeof fromPiSettings === "object" && !Array.isArray(fromPiSettings)) {
 		return fromPiSettings as HeadroomSettings;
@@ -38,7 +38,7 @@ export function loadHeadroomConfig(
 	const envBaseUrl = env.PI_HEADROOM_URL || env.HEADROOM_URL || env.HEADROOM_BASE_URL || DEFAULT_BASE_URL;
 	const baseUrl = normalizeBaseUrl(parseString(settings.baseUrl ?? settings.url, envBaseUrl));
 	return {
-		enabled: parseBoolean(settings.enabled, parseBoolean(env.PI_HEADROOM_ENABLED, true)),
+		enabled: parseBoolean(settings.enabled, parseBoolean(env.PI_HEADROOM_ENABLED, false)),
 		baseUrl,
 		allowRemote: parseBoolean(settings.allowRemote, parseBoolean(env.PI_HEADROOM_ALLOW_REMOTE, false)),
 		autoStart: parseBoolean(settings.autoStart, parseBoolean(env.PI_HEADROOM_AUTO_START, true)),

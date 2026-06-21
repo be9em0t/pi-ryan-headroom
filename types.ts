@@ -88,7 +88,7 @@ export interface HeadroomStats {
 }
 
 export interface CompressionMapping {
-	sourceIndex: number;
+	sourceIndex: number | null;
 	message: OpenAIMessage;
 	applyTo: "toolResult" | null;
 	originalText: string;

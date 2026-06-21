@@ -31,6 +31,7 @@ By default the extension auto-starts a local token-mode proxy (`headroom proxy -
 - Skips entirely until context usage reaches the configured token threshold.
 - Sends an OpenAI-shaped copy of the conversation to the proxy's `/v1/compress` endpoint.
 - Applies the result only to large `toolResult` messages, preserving pi metadata (`toolName`, `details`, tool-call ids, images).
+- Sends each candidate `toolResult` with a minimal matching assistant `tool_calls` context so Headroom can resolve the tool name and apply its own tool-aware routing/exclusion logic.
 - Rejects any response that changes message count, roles, tool-call ids, or non-candidate content.
 
 ## Privacy
@@ -65,7 +66,7 @@ Example:
 
 | Setting key | Env fallback | Default | Description |
 | --- | --- | --- | --- |
-| `enabled` | `PI_HEADROOM_ENABLED` | `true` | Enable compression on start. |
+| `enabled` | `PI_HEADROOM_ENABLED` | `false` | Enable compression on start. |
 | `baseUrl` (`url` also accepted) | `PI_HEADROOM_URL` (`HEADROOM_URL` / `HEADROOM_BASE_URL` also accepted) | `http://127.0.0.1:8788` | Proxy base URL. |
 | `allowRemote` | `PI_HEADROOM_ALLOW_REMOTE` | `false` | Allow non-local proxy URLs. |
 | `autoStart` | `PI_HEADROOM_AUTO_START` | `true` | Auto-start a local persistent proxy when offline. |

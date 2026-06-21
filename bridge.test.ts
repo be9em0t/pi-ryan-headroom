@@ -22,11 +22,11 @@ function createAssistantMessage(): AgentMessage {
 	} as AgentMessage;
 }
 
-function createToolResult(text: string): AgentMessage {
+function createToolResult(text: string, toolName = "list_records"): AgentMessage {
 	return {
 		role: "toolResult",
 		toolCallId: "call_1",
-		toolName: "list_records",
+		toolName,
 		content: [{ type: "text", text }],
 		details: { rows: 1000 },
 		isError: false,
@@ -75,61 +75,27 @@ describe("headroom bridge", () => {
 		expect(result).toEqual({ ok: false, reason: "message-count-changed" });
 	});
 
-	it("rejects compression when non-candidate user content changes", () => {
-		const messages = [
-			createUserMessage("exact user intent"),
-			createAssistantMessage(),
-			createToolResult("large result"),
-		];
+	it("sends minimal assistant tool-call context with tool-result candidates", () => {
+		const messages = [createUserMessage("exact user intent"), createAssistantMessage(), createToolResult("large result")];
+
 		const payload = buildCompressionPayload(messages, 5);
-		const compressed = payload.messages.map((message): OpenAIMessage => {
-			if (message.role === "user") return { ...message, content: "changed intent" };
-			return message;
-		});
 
-		const result = applyCompressionResult(messages, payload.mappings, compressed, { minMessageChars: 5 });
-
-		expect(result).toEqual({ ok: false, reason: "non-candidate-changed:user" });
-	});
-
-	it("does not include user image bytes in the compression payload", () => {
-		const messages = [
+		expect(payload.messages).toEqual([
 			{
-				role: "user",
-				content: [
-					{ type: "text", text: "inspect this" },
-					{ type: "image", data: "base64-image-data", mimeType: "image/png" },
+				role: "assistant",
+				content: null,
+				tool_calls: [
+					{
+						id: "call_1",
+						type: "function",
+						function: { name: "list_records", arguments: JSON.stringify({ limit: 1000 }) },
+					},
 				],
-				timestamp: 0,
-			} as AgentMessage,
-			createAssistantMessage(),
-			createToolResult("large result"),
-		];
-
-		const payload = buildCompressionPayload(messages, 5);
-
-		expect(payload.messages[0]).toEqual({ role: "user", content: "inspect this" });
-		expect(JSON.stringify(payload.messages)).not.toContain("base64-image-data");
-	});
-
-	it("replaces image-only user messages with a small compression placeholder", () => {
-		const messages = [
-			{
-				role: "user",
-				content: [{ type: "image", data: "base64-image-data", mimeType: "image/png" }],
-				timestamp: 0,
-			} as AgentMessage,
-			createAssistantMessage(),
-			createToolResult("large result"),
-		];
-
-		const payload = buildCompressionPayload(messages, 5);
-
-		expect(payload.messages[0]).toEqual({
-			role: "user",
-			content: "[image omitted from Headroom compression payload]",
-		});
-		expect(JSON.stringify(payload.messages)).not.toContain("base64-image-data");
+			},
+			{ role: "tool", content: "large result", tool_call_id: "call_1" },
+		]);
+		expect(payload.candidateCount).toBe(1);
+		expect(payload.mappings).toHaveLength(2);
 	});
 
 	it("does not treat small tool results as compression candidates", () => {
@@ -138,5 +104,21 @@ describe("headroom bridge", () => {
 		const payload = buildCompressionPayload(messages, 100);
 
 		expect(payload.candidateCount).toBe(0);
+	});
+
+	it("sends exact-context tool results with tool names so Headroom can protect them", () => {
+		const largeText = "exact file content\n".repeat(200);
+		const assistant = createAssistantMessage();
+		(assistant as { content: Array<{ name?: string }> }).content[0].name = "read";
+		const messages = [createUserMessage("read it"), assistant, createToolResult(largeText, "read")];
+
+		const payload = buildCompressionPayload(messages, 10);
+
+		expect(payload.candidateCount).toBe(1);
+		expect(payload.messages[0]).toMatchObject({
+			role: "assistant",
+			tool_calls: [{ id: "call_1", function: { name: "read" } }],
+		});
+		expect(payload.messages[1]).toEqual({ role: "tool", content: largeText, tool_call_id: "call_1" });
 	});
 });

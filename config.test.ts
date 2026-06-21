@@ -8,7 +8,7 @@ describe("headroom config", () => {
 	it("defaults to local compression-only proxy with conservative thresholds", () => {
 		const config = loadHeadroomConfig({});
 
-		expect(config.enabled).toBe(true);
+		expect(config.enabled).toBe(false);
 		expect(config.baseUrl).toBe("http://127.0.0.1:8788");
 		expect(config.allowRemote).toBe(false);
 		expect(config.autoStart).toBe(true);
@@ -55,14 +55,16 @@ describe("headroom config", () => {
 			fs.writeFileSync(
 				settingsPath,
 				JSON.stringify({
-					enabled: false,
-					baseUrl: "http://localhost:9999/",
-					allowRemote: true,
-					autoStart: false,
-					command: "custom-headroom",
-					minContextTokens: 12345,
-					minMessageChars: 678,
-					timeoutMs: 4321,
+					headroom: {
+						enabled: false,
+						baseUrl: "http://localhost:9999/",
+						allowRemote: true,
+						autoStart: false,
+						command: "custom-headroom",
+						minContextTokens: 12345,
+						minMessageChars: 678,
+						timeoutMs: 4321,
+					},
 				}),
 				"utf-8",
 			);

@@ -20,6 +20,8 @@ const STANDARD_COMPRESSIBLE_ROLES = new Set(["user", "assistant", "toolResult"])
 
 export function buildCompressionPayload(messages: AgentMessage[], minMessageChars: number): CompressionPayload {
 	const mappings: CompressionMapping[] = [];
+	const toolCallsById = buildToolCallLookup(messages);
+	let candidateCount = 0;
 
 	for (let sourceIndex = 0; sourceIndex < messages.length; sourceIndex++) {
 		const source = messages[sourceIndex] as AnyMessage;
@@ -31,18 +33,34 @@ export function buildCompressionPayload(messages: AgentMessage[], minMessageChar
 		const originalText = extractOpenAIText(converted);
 		if (originalText.length < minMessageChars) continue;
 
+		const toolCall = toolCallsById.get(converted.tool_call_id) ?? synthesizeToolCall(source, converted.tool_call_id);
+		if (!toolCall) continue;
+
+		const assistantContext: OpenAIAssistantMessage = {
+			role: "assistant",
+			content: null,
+			tool_calls: [toolCall],
+		};
+
+		mappings.push({
+			sourceIndex: null,
+			message: assistantContext,
+			applyTo: null,
+			originalText: "",
+		});
 		mappings.push({
 			sourceIndex,
 			message: converted,
 			applyTo: "toolResult",
 			originalText,
 		});
+		candidateCount++;
 	}
 
 	return {
 		messages: mappings.map((mapping) => mapping.message),
 		mappings,
-		candidateCount: mappings.length,
+		candidateCount,
 	};
 }
 
@@ -72,6 +90,10 @@ export function applyCompressionResult(
 			return { ok: false, reason: `non-candidate-changed:${mapping.message.role}` };
 		}
 
+		if (mapping.sourceIndex === null) {
+			return { ok: false, reason: "candidate-source-missing" };
+		}
+
 		const target = nextMessages[mapping.sourceIndex] as AnyMessage;
 		if (target.role !== "toolResult") {
 			return { ok: false, reason: "source-role-mismatch" };
@@ -88,6 +110,31 @@ export function applyCompressionResult(
 	}
 
 	return { ok: true, messages: nextMessages, appliedMessages };
+}
+
+function buildToolCallLookup(messages: AgentMessage[]): Map<string, OpenAIToolCall> {
+	const lookup = new Map<string, OpenAIToolCall>();
+	for (const message of messages) {
+		const source = message as AnyMessage;
+		if (source.role !== "assistant" || !Array.isArray(source.content)) continue;
+		for (const part of source.content) {
+			if (isToolCall(part)) lookup.set(part.id, convertToolCall(part));
+		}
+	}
+	return lookup;
+}
+
+function synthesizeToolCall(message: AnyMessage, toolCallId: string): OpenAIToolCall | undefined {
+	const toolName = readStringProperty(message, "toolName");
+	if (!toolName) return undefined;
+	return {
+		id: toolCallId,
+		type: "function",
+		function: {
+			name: toolName,
+			arguments: "{}",
+		},
+	};
 }
 
 function convertMessage(message: AnyMessage): OpenAIMessage | undefined {
