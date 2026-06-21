@@ -16,6 +16,7 @@ describe("headroom config", () => {
 		expect(config.minContextTokens).toBe(20_000);
 		expect(config.minMessageChars).toBe(2_000);
 		expect(config.timeoutMs).toBe(30_000);
+		expect(config.ignore).toEqual([]);
 	});
 
 	it("blocks remote proxy URLs unless explicitly allowed", () => {
@@ -64,6 +65,7 @@ describe("headroom config", () => {
 						minContextTokens: 12345,
 						minMessageChars: 678,
 						timeoutMs: 4321,
+						ignore: ["**/AGENTS.md", "obsidian_index.md", ""],
 					},
 				}),
 				"utf-8",
@@ -79,6 +81,7 @@ describe("headroom config", () => {
 			expect(config.minContextTokens).toBe(12345);
 			expect(config.minMessageChars).toBe(678);
 			expect(config.timeoutMs).toBe(4321);
+			expect(config.ignore).toEqual(["**/AGENTS.md", "obsidian_index.md"]);
 		} finally {
 			fs.rmSync(tmpDir, { recursive: true, force: true });
 		}

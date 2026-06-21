@@ -1,9 +1,9 @@
 import type { ContextEvent, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { applyCompressionResult, buildCompressionPayload } from "./bridge.ts";
 import { HeadroomHttpClient } from "./client.ts";
-import { isRemoteBlocked, loadHeadroomConfig } from "./config.ts";
+import { isRemoteBlocked, loadHeadroomConfig, loadMergedHeadroomSettings } from "./config.ts";
 import { startPersistentHeadroomProxy } from "./proxy-manager.ts";
-import type { AgentMessage, CompressResult, HeadroomConfig, HeadroomStats } from "./types.ts";
+import type { AgentMessage, CompressResult, HeadroomConfig, HeadroomStats, PathResolutionMiss } from "./types.ts";
 
 const STATUS_KEY = "headroom";
 const SUBCOMMANDS = ["status", "on", "off", "health", "stats"] as const;
@@ -33,6 +33,7 @@ export default function headroomExtension(pi: ExtensionAPI) {
 	const runtime = createRuntime();
 
 	pi.on("session_start", (_event, ctx) => {
+		refreshRuntimeConfig(runtime, ctx.cwd);
 		if (isRemoteBlocked(runtime.config)) {
 			runtime.refreshStatus(ctx);
 			ctx.ui.notify(
@@ -78,7 +79,7 @@ function createRuntime(): HeadroomRuntime {
 		proxyStartAttempted: false,
 		remoteWarningShown: false,
 		offlineWarningShown: false,
-		stats: { attempts: 0, applied: 0, guardSkips: 0, tokensSaved: 0 },
+		stats: { attempts: 0, applied: 0, guardSkips: 0, ignoredPathCandidates: 0, pathResolutionMisses: 0, tokensSaved: 0 },
 	};
 
 	const runtime: HeadroomRuntime = {
@@ -98,6 +99,18 @@ function createRuntime(): HeadroomRuntime {
 		},
 	};
 	return runtime;
+}
+
+function refreshRuntimeConfig(runtime: HeadroomRuntime, cwd: string): void {
+	const nextConfig = loadHeadroomConfig(process.env, loadMergedHeadroomSettings(cwd));
+	const endpointChanged = nextConfig.baseUrl !== runtime.config.baseUrl || nextConfig.timeoutMs !== runtime.config.timeoutMs;
+	runtime.config = nextConfig;
+	runtime.state.enabled = nextConfig.enabled;
+	if (endpointChanged) {
+		runtime.client = new HeadroomHttpClient({ baseUrl: nextConfig.baseUrl, timeoutMs: nextConfig.timeoutMs });
+		runtime.state.proxyOnline = null;
+		runtime.state.proxyStartAttempted = false;
+	}
 }
 
 async function updateHealthState(runtime: HeadroomRuntime, signal?: AbortSignal): Promise<boolean> {
@@ -188,7 +201,11 @@ async function handleContextCompression(
 	ctx: ExtensionContext,
 ): Promise<{ messages?: AgentMessage[] } | undefined> {
 	if (shouldSkipBeforePayload(runtime, ctx)) return undefined;
-	const payload = buildCompressionPayload(event.messages, runtime.config.minMessageChars);
+	const payload = buildCompressionPayload(event.messages, runtime.config.minMessageChars, {
+		cwd: ctx.cwd,
+		ignore: runtime.config.ignore,
+	});
+	recordPayloadSkips(runtime.state.stats, payload.ignoredPathCount, payload.pathResolutionMisses);
 	if (payload.candidateCount === 0) return undefined;
 	if (runtime.state.proxyOnline !== true) {
 		void ensureProxyInBackground(runtime, ctx);
@@ -234,6 +251,13 @@ function shouldSkipBeforePayload(runtime: HeadroomRuntime, ctx: ExtensionContext
 	}
 	const usage = ctx.getContextUsage();
 	return usage?.tokens !== null && usage?.tokens !== undefined && usage.tokens < runtime.config.minContextTokens;
+}
+
+function recordPayloadSkips(stats: HeadroomStats, ignoredPathCount: number, pathResolutionMisses: PathResolutionMiss[]): void {
+	stats.ignoredPathCandidates += ignoredPathCount;
+	stats.pathResolutionMisses += pathResolutionMisses.length;
+	const lastMiss = pathResolutionMisses.at(-1);
+	if (lastMiss) stats.lastPathResolutionMiss = lastMiss;
 }
 
 function recordGuardSkip(stats: HeadroomStats, reason: string): void {
@@ -384,11 +408,14 @@ function renderStatus(config: HeadroomConfig, state: HeadroomRuntimeState): stri
 		`  Shutdown: proxy is left running after Pi exits`,
 		`  Remote:  ${isRemoteBlocked(config) ? "blocked" : config.allowRemote ? "allowed" : "local-only"}`,
 		`  Thresholds: context >= ${config.minContextTokens.toLocaleString()} tokens, toolResult >= ${config.minMessageChars.toLocaleString()} chars`,
+		`  Ignore rules: ${config.ignore.length}`,
 		"",
 		"Session stats:",
 		`  Attempts:     ${stats.attempts}`,
 		`  Applied:      ${stats.applied}`,
 		`  Guard skips:  ${stats.guardSkips}`,
+		`  Ignored path candidates: ${stats.ignoredPathCandidates}`,
+		`  Path resolution misses: ${stats.pathResolutionMisses}`,
 		`  Tokens saved: ${stats.tokensSaved.toLocaleString()}`,
 	];
 	if (stats.last) {
@@ -400,6 +427,12 @@ function renderStatus(config: HeadroomConfig, state: HeadroomRuntimeState): stri
 			`  Applied messages: ${stats.last.appliedMessages}`,
 			`  Transforms: ${stats.last.transformsApplied.join(", ") || "none"}`,
 			`  CCR hashes: ${stats.last.ccrHashes.length}`,
+		);
+	}
+	if (stats.lastPathResolutionMiss) {
+		lines.push(
+			"",
+			`Last path resolution miss: tool=${stats.lastPathResolutionMiss.toolName ?? "unknown"} call=${stats.lastPathResolutionMiss.toolCallId} sourceIndex=${stats.lastPathResolutionMiss.sourceIndex} reason=${stats.lastPathResolutionMiss.reason}`,
 		);
 	}
 	if (stats.lastSkipReason) lines.push("", `Last guard skip: ${stats.lastSkipReason}`);

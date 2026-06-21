@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { applyCompressionResult, buildCompressionPayload } from "./bridge.ts";
 import type { AgentMessage, OpenAIMessage } from "./types.ts";
 
-function createAssistantMessage(): AgentMessage {
+function createAssistantMessage(args: Record<string, unknown> = { limit: 1000 }): AgentMessage {
 	return {
 		role: "assistant",
 		content: [
@@ -10,7 +10,7 @@ function createAssistantMessage(): AgentMessage {
 				type: "toolCall",
 				id: "call_1",
 				name: "list_records",
-				arguments: { limit: 1000 },
+				arguments: args,
 			},
 		],
 		api: "anthropic-messages",
@@ -76,7 +76,7 @@ describe("headroom bridge", () => {
 	});
 
 	it("sends minimal assistant tool-call context with tool-result candidates", () => {
-		const messages = [createUserMessage("exact user intent"), createAssistantMessage(), createToolResult("large result")];
+		const messages = [createUserMessage("exact user intent"), createAssistantMessage({ limit: 1000 }), createToolResult("large result")];
 
 		const payload = buildCompressionPayload(messages, 5);
 
@@ -108,7 +108,7 @@ describe("headroom bridge", () => {
 
 	it("sends exact-context tool results with tool names so Headroom can protect them", () => {
 		const largeText = "exact file content\n".repeat(200);
-		const assistant = createAssistantMessage();
+		const assistant = createAssistantMessage({ path: "./AGENTS.md" });
 		(assistant as { content: Array<{ name?: string }> }).content[0].name = "read";
 		const messages = [createUserMessage("read it"), assistant, createToolResult(largeText, "read")];
 
@@ -120,5 +120,45 @@ describe("headroom bridge", () => {
 			tool_calls: [{ id: "call_1", function: { name: "read" } }],
 		});
 		expect(payload.messages[1]).toEqual({ role: "tool", content: largeText, tool_call_id: "call_1" });
+	});
+
+	it("skips ignored path candidates before Headroom processing", () => {
+		const largeText = "exact file content\n".repeat(200);
+		const messages = [createUserMessage("read it"), createAssistantMessage({ path: "./notes/AGENTS.md" }), createToolResult(largeText, "read")];
+
+		const payload = buildCompressionPayload(messages, 10, { cwd: "/repo", ignore: ["AGENTS.md"] });
+
+		expect(payload.candidateCount).toBe(0);
+		expect(payload.ignoredPathCount).toBe(1);
+		expect(payload.messages).toEqual([]);
+	});
+
+	it("supports relative folders, globstars, and absolute ignore rules", () => {
+		const largeText = "exact file content\n".repeat(200);
+		const cases = [
+			{ path: "docs/generated/out.md", ignore: ["docs/generated/"] },
+			{ path: "notes/sub/obsidian_index.md", ignore: ["**/obsidian_index.md"] },
+			{ path: "/repo/private/secret.md", ignore: ["/repo/private/**"] },
+		];
+
+		for (const item of cases) {
+			const messages = [createUserMessage("read it"), createAssistantMessage({ path: item.path }), createToolResult(largeText, "read")];
+			const payload = buildCompressionPayload(messages, 10, { cwd: "/repo", ignore: item.ignore });
+			expect(payload.ignoredPathCount).toBe(1);
+			expect(payload.messages).toEqual([]);
+		}
+	});
+
+	it("records path resolution misses without blocking candidates", () => {
+		const largeText = "tool output\n".repeat(200);
+		const messages = [createUserMessage("list"), createAssistantMessage({ limit: 1000 }), createToolResult(largeText)];
+
+		const payload = buildCompressionPayload(messages, 10, { cwd: "/repo", ignore: ["**/AGENTS.md"] });
+
+		expect(payload.candidateCount).toBe(1);
+		expect(payload.pathResolutionMisses).toEqual([
+			{ sourceIndex: 2, toolCallId: "call_1", toolName: "list_records", reason: "no-path-args" },
+		]);
+		expect(payload.messages).toHaveLength(2);
 	});
 });

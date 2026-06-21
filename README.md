@@ -59,7 +59,8 @@ Example:
 {
   "headroom": {
     "minContextTokens": 10000,
-    "minMessageChars": 1000
+    "minMessageChars": 1000,
+    "ignore": ["**/AGENTS.md", "**/obsidian_index.md"]
   }
 }
 ```
@@ -74,5 +75,8 @@ Example:
 | `minContextTokens` | `PI_HEADROOM_MIN_CONTEXT_TOKENS` | `20000` | Skip compression below this context token count. |
 | `minMessageChars` | `PI_HEADROOM_MIN_MESSAGE_CHARS` | `2000` | Only compress tool results at or above this size. |
 | `timeoutMs` | `PI_HEADROOM_TIMEOUT_MS` | `30000` | HTTP timeout for proxy requests. |
+| `ignore` | — | `[]` | Gitignore-like path patterns for tool-result files that must never be sent to Headroom. Global and project lists are appended. |
+
+Project-local settings in `<project>/.pi/settings.json` are merged over global settings in `~/.pi/agent/settings.json`; `ignore` entries are appended so global protection remains active.
 
 Boolean values accept JSON booleans, or strings such as `1/0`, `true/false`, `yes/no`, `on/off`.

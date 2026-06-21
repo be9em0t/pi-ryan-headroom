@@ -1,13 +1,16 @@
 import type { ImageContent, TextContent, ToolCall } from "@earendil-works/pi-ai";
+import * as path from "node:path";
 import type {
 	AgentMessage,
 	ApplyCompressionOptions,
 	ApplyCompressionResult,
+	BuildCompressionPayloadOptions,
 	CompressionMapping,
 	CompressionPayload,
 	OpenAIAssistantMessage,
 	OpenAIMessage,
 	OpenAIToolCall,
+	PathResolutionMiss,
 } from "./types.ts";
 
 type AnyMessage = AgentMessage & { role?: string; content?: unknown; timestamp?: number };
@@ -16,12 +19,25 @@ interface MessageWithContent {
 	content: unknown;
 }
 
+interface ToolCallContext {
+	toolCall: OpenAIToolCall;
+	args: Record<string, unknown>;
+}
+
 const STANDARD_COMPRESSIBLE_ROLES = new Set(["user", "assistant", "toolResult"]);
 
-export function buildCompressionPayload(messages: AgentMessage[], minMessageChars: number): CompressionPayload {
+export function buildCompressionPayload(
+	messages: AgentMessage[],
+	minMessageChars: number,
+	options?: BuildCompressionPayloadOptions,
+): CompressionPayload {
 	const mappings: CompressionMapping[] = [];
 	const toolCallsById = buildToolCallLookup(messages);
+	const hasIgnoreRules = Boolean(options?.ignore.length);
+	const ignoreMatcher = createIgnoreMatcher(options);
+	const pathResolutionMisses: PathResolutionMiss[] = [];
 	let candidateCount = 0;
+	let ignoredPathCount = 0;
 
 	for (let sourceIndex = 0; sourceIndex < messages.length; sourceIndex++) {
 		const source = messages[sourceIndex] as AnyMessage;
@@ -33,8 +49,24 @@ export function buildCompressionPayload(messages: AgentMessage[], minMessageChar
 		const originalText = extractOpenAIText(converted);
 		if (originalText.length < minMessageChars) continue;
 
-		const toolCall = toolCallsById.get(converted.tool_call_id) ?? synthesizeToolCall(source, converted.tool_call_id);
+		const toolCallContext = toolCallsById.get(converted.tool_call_id);
+		const toolCall = toolCallContext?.toolCall ?? synthesizeToolCall(source, converted.tool_call_id);
 		if (!toolCall) continue;
+
+		const candidatePaths = [...extractPathStrings(toolCallContext?.args), ...extractPathStrings(readRecordProperty(source, "details"))];
+		if (candidatePaths.length === 0) {
+			if (hasIgnoreRules) {
+				pathResolutionMisses.push({
+					sourceIndex,
+					toolCallId: converted.tool_call_id,
+					toolName: toolCall.function.name,
+					reason: toolCallContext ? "no-path-args" : "missing-tool-call",
+				});
+			}
+		} else if (ignoreMatcher(candidatePaths)) {
+			ignoredPathCount++;
+			continue;
+		}
 
 		const assistantContext: OpenAIAssistantMessage = {
 			role: "assistant",
@@ -61,6 +93,8 @@ export function buildCompressionPayload(messages: AgentMessage[], minMessageChar
 		messages: mappings.map((mapping) => mapping.message),
 		mappings,
 		candidateCount,
+		ignoredPathCount,
+		pathResolutionMisses,
 	};
 }
 
@@ -112,13 +146,13 @@ export function applyCompressionResult(
 	return { ok: true, messages: nextMessages, appliedMessages };
 }
 
-function buildToolCallLookup(messages: AgentMessage[]): Map<string, OpenAIToolCall> {
-	const lookup = new Map<string, OpenAIToolCall>();
+function buildToolCallLookup(messages: AgentMessage[]): Map<string, ToolCallContext> {
+	const lookup = new Map<string, ToolCallContext>();
 	for (const message of messages) {
 		const source = message as AnyMessage;
 		if (source.role !== "assistant" || !Array.isArray(source.content)) continue;
 		for (const part of source.content) {
-			if (isToolCall(part)) lookup.set(part.id, convertToolCall(part));
+			if (isToolCall(part)) lookup.set(part.id, { toolCall: convertToolCall(part), args: part.arguments });
 		}
 	}
 	return lookup;
@@ -135,6 +169,98 @@ function synthesizeToolCall(message: AnyMessage, toolCallId: string): OpenAITool
 			arguments: "{}",
 		},
 	};
+}
+
+function createIgnoreMatcher(options: BuildCompressionPayloadOptions | undefined): (candidatePaths: string[]) => boolean {
+	if (!options || options.ignore.length === 0) return () => false;
+	const cwd = path.resolve(options.cwd);
+	const rules = options.ignore.map((rule) => compileIgnoreRule(rule, cwd));
+	return (candidatePaths) => {
+		for (const candidate of candidatePaths) {
+			const normalized = normalizeCandidatePath(candidate, cwd);
+			if (!normalized) continue;
+			if (rules.some((rule) => rule(normalized))) return true;
+		}
+		return false;
+	};
+}
+
+function compileIgnoreRule(rule: string, cwd: string): (candidate: { absolute: string; relative: string; basename: string }) => boolean {
+	const normalizedRule = normalizeSlashes(rule.trim());
+	const directoryRule = normalizedRule.endsWith("/");
+	if (path.isAbsolute(normalizedRule)) {
+		const pattern = directoryRule ? `${normalizeSlashes(path.resolve(normalizedRule))}/**` : normalizeSlashes(path.resolve(normalizedRule));
+		const re = globToRegExp(pattern);
+		return (candidate) => re.test(candidate.absolute);
+	}
+	const pattern = directoryRule ? `${normalizedRule}**` : normalizedRule;
+	const matchPattern = pattern.includes("/") ? pattern : `**/${pattern}`;
+	const re = globToRegExp(matchPattern);
+	return (candidate) => re.test(candidate.relative) || (!pattern.includes("/") && globToRegExp(pattern).test(candidate.basename));
+}
+
+function normalizeCandidatePath(candidate: string, cwd: string): { absolute: string; relative: string; basename: string } | undefined {
+	const trimmed = candidate.trim();
+	if (!trimmed) return undefined;
+	const absolute = normalizeSlashes(path.resolve(cwd, trimmed));
+	const relative = normalizeSlashes(path.relative(cwd, absolute)) || path.basename(absolute);
+	return { absolute, relative, basename: path.basename(absolute) };
+}
+
+function globToRegExp(glob: string): RegExp {
+	let source = "^";
+	for (let index = 0; index < glob.length; index++) {
+		const char = glob[index];
+		const next = glob[index + 1];
+		if (char === "*" && next === "*") {
+			const after = glob[index + 2];
+			if (after === "/") {
+				source += "(?:.*/)?";
+				index += 2;
+			} else {
+				source += ".*";
+				index++;
+			}
+		} else if (char === "*") {
+			source += "[^/]*";
+		} else if (char === "?") {
+			source += "[^/]";
+		} else {
+			source += escapeRegExp(char);
+		}
+	}
+	return new RegExp(`${source}$`);
+}
+
+function escapeRegExp(value: string): string {
+	return value.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&");
+}
+
+function normalizeSlashes(value: string): string {
+	return value.replace(/\\/g, "/");
+}
+
+function extractPathStrings(value: unknown): string[] {
+	if (!isRecord(value)) return [];
+	const paths: string[] = [];
+	for (const key of ["path", "file", "filePath", "filepath", "filename"]) {
+		const property = value[key];
+		if (typeof property === "string" && property.trim()) paths.push(property);
+	}
+	for (const key of ["paths", "files"]) {
+		const property = value[key];
+		if (!Array.isArray(property)) continue;
+		for (const item of property) {
+			if (typeof item === "string" && item.trim()) paths.push(item);
+		}
+	}
+	return paths;
+}
+
+function readRecordProperty(value: unknown, key: string): Record<string, unknown> | undefined {
+	if (!isRecord(value)) return undefined;
+	const property = value[key];
+	return isRecord(property) ? property : undefined;
 }
 
 function convertMessage(message: AnyMessage): OpenAIMessage | undefined {

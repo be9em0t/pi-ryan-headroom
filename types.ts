@@ -67,13 +67,17 @@ export interface HeadroomConfig {
 	minContextTokens: number;
 	minMessageChars: number;
 	timeoutMs: number;
+	ignore: string[];
 }
 
 export interface HeadroomStats {
 	attempts: number;
 	applied: number;
 	guardSkips: number;
+	ignoredPathCandidates: number;
+	pathResolutionMisses: number;
 	tokensSaved: number;
+	lastPathResolutionMiss?: PathResolutionMiss;
 	last?: {
 		tokensBefore: number;
 		tokensAfter: number;
@@ -98,6 +102,20 @@ export interface CompressionPayload {
 	messages: OpenAIMessage[];
 	mappings: CompressionMapping[];
 	candidateCount: number;
+	ignoredPathCount: number;
+	pathResolutionMisses: PathResolutionMiss[];
+}
+
+export interface PathResolutionMiss {
+	sourceIndex: number;
+	toolCallId: string;
+	toolName?: string;
+	reason: "missing-tool-call" | "no-path-args";
+}
+
+export interface BuildCompressionPayloadOptions {
+	cwd: string;
+	ignore: string[];
 }
 
 export interface ApplyCompressionOptions {

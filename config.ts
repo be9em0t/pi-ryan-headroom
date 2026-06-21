@@ -20,15 +20,17 @@ export interface HeadroomSettings {
 	minContextTokens?: number | string;
 	minMessageChars?: number | string;
 	timeoutMs?: number | string;
+	ignore?: unknown;
 }
 
 export function loadHeadroomSettings(settingsFile = PI_SETTINGS_FILE): HeadroomSettings {
-	const piSettings = readJsonObject(settingsFile);
-	const fromPiSettings = piSettings?.headroom;
-	if (fromPiSettings && typeof fromPiSettings === "object" && !Array.isArray(fromPiSettings)) {
-		return fromPiSettings as HeadroomSettings;
-	}
-	return {};
+	return readHeadroomSettingsFile(settingsFile);
+}
+
+export function loadMergedHeadroomSettings(cwd: string): HeadroomSettings {
+	const globalSettings = readHeadroomSettingsFile(PI_SETTINGS_FILE);
+	const projectSettings = readHeadroomSettingsFile(path.join(cwd, ".pi", "settings.json"));
+	return mergeHeadroomSettings(globalSettings, projectSettings);
 }
 
 export function loadHeadroomConfig(
@@ -54,6 +56,7 @@ export function loadHeadroomConfig(
 			1,
 		),
 		timeoutMs: parseInteger(settings.timeoutMs, parseInteger(env.PI_HEADROOM_TIMEOUT_MS, DEFAULT_TIMEOUT_MS, 100), 100),
+		ignore: parseStringArray(settings.ignore),
 	};
 }
 
@@ -68,6 +71,23 @@ export function isLocalHeadroomUrl(rawUrl: string): boolean {
 
 export function isRemoteBlocked(config: Pick<HeadroomConfig, "baseUrl" | "allowRemote">): boolean {
 	return !config.allowRemote && !isLocalHeadroomUrl(config.baseUrl);
+}
+
+function readHeadroomSettingsFile(settingsFile: string): HeadroomSettings {
+	const piSettings = readJsonObject(settingsFile);
+	const fromPiSettings = piSettings?.headroom;
+	if (fromPiSettings && typeof fromPiSettings === "object" && !Array.isArray(fromPiSettings)) {
+		return fromPiSettings as HeadroomSettings;
+	}
+	return {};
+}
+
+function mergeHeadroomSettings(base: HeadroomSettings, override: HeadroomSettings): HeadroomSettings {
+	return {
+		...base,
+		...override,
+		ignore: [...parseStringArray(base.ignore), ...parseStringArray(override.ignore)],
+	};
 }
 
 function readJsonObject(filePath: string): Record<string, unknown> | undefined {
@@ -106,4 +126,15 @@ function parseInteger(raw: unknown, fallback: number, min: number): number {
 	const parsed = typeof raw === "number" ? raw : typeof raw === "string" ? Number.parseInt(raw, 10) : Number.NaN;
 	if (!Number.isFinite(parsed) || parsed < min) return fallback;
 	return Math.trunc(parsed);
+}
+
+function parseStringArray(raw: unknown): string[] {
+	if (!Array.isArray(raw)) return [];
+	const values: string[] = [];
+	for (const item of raw) {
+		if (typeof item !== "string") continue;
+		const trimmed = item.trim();
+		if (trimmed) values.push(trimmed);
+	}
+	return values;
 }

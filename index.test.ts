@@ -12,7 +12,7 @@ function createContext(theme: unknown): ExtensionContext {
 }
 
 function createStats(): HeadroomStats {
-	return { attempts: 0, applied: 0, guardSkips: 0, tokensSaved: 0 };
+	return { attempts: 0, applied: 0, guardSkips: 0, ignoredPathCandidates: 0, pathResolutionMisses: 0, tokensSaved: 0 };
 }
 
 describe("headroom error classification", () => {
@@ -44,7 +44,7 @@ describe("headroom status rendering", () => {
 			stats: createStats(),
 		});
 
-		expect(status).toBe("✓ Headroom");
+		expect(status).toBe("✓ Hdr");
 	});
 
 	it("uses theme colors when the UI theme exposes fg", () => {
@@ -63,6 +63,6 @@ describe("headroom status rendering", () => {
 			stats: createStats(),
 		});
 
-		expect(status).toBe("<success>✓</success><dim> Headroom</dim>");
+		expect(status).toBe("<success>✓</success><dim> Hdr</dim>");
 	});
 });
