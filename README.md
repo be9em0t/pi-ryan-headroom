@@ -46,6 +46,7 @@ Compression sends conversation context to the proxy, so remote URLs are blocked 
 - `/headroom off` — disable compression for this session (the proxy keeps running).
 - `/headroom health` — check / start the proxy and report whether it is online.
 - `/headroom stats` — print the proxy's own `/stats` output.
+- `/headroom help` — open the extension help menu. Currently includes `README.md`.
 
 The footer shows a compact status (`✓ Headroom -42% (12,345 saved)`) once compression is applied.
 

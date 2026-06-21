@@ -1,3 +1,6 @@
+import { spawn } from "node:child_process";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { ContextEvent, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { applyCompressionResult, buildCompressionPayload } from "./bridge.ts";
 import { HeadroomHttpClient } from "./client.ts";
@@ -6,7 +9,9 @@ import { startPersistentHeadroomProxy } from "./proxy-manager.ts";
 import type { AgentMessage, CompressResult, HeadroomConfig, HeadroomStats, PathResolutionMiss } from "./types.ts";
 
 const STATUS_KEY = "headroom";
-const SUBCOMMANDS = ["status", "on", "off", "health", "stats"] as const;
+const EXTENSION_DIR = dirname(fileURLToPath(import.meta.url));
+const HELP_FILES = [{ label: "README.md", path: join(EXTENSION_DIR, "README.md") }];
+const SUBCOMMANDS = ["status", "on", "off", "health", "stats", "help"] as const;
 
 type Subcommand = (typeof SUBCOMMANDS)[number];
 
@@ -314,6 +319,7 @@ async function handleCommand(
 			runtime.state.enabled ? "temporary turn off" : "temporary turn on",
 			"health",
 			"proxy stats",
+			"help",
 		]);
 		if (!choice) return;
 		if (choice.startsWith("status")) return handleCommand(runtime, "status", ctx);
@@ -321,6 +327,7 @@ async function handleCommand(
 		if (choice === "temporary turn off") return handleCommand(runtime, "off", ctx);
 		if (choice === "health") return handleCommand(runtime, "health", ctx);
 		if (choice === "proxy stats") return handleCommand(runtime, "stats", ctx);
+		if (choice === "help") return handleCommand(runtime, "help", ctx);
 		return;
 	}
 	if (command === "on") {
@@ -355,7 +362,27 @@ async function handleCommand(
 		await showProxyStats(ctx, runtime.client, runtime.config);
 		return;
 	}
+	if (command === "help") {
+		await showHelpMenu(ctx);
+		return;
+	}
 	ctx.ui.notify(renderStatus(runtime.config, runtime.state), "info");
+}
+
+async function showHelpMenu(ctx: ExtensionContext): Promise<void> {
+	const choice = await ctx.ui.select("Headroom help", HELP_FILES.map((file) => file.label));
+	if (!choice) return;
+	const file = HELP_FILES.find((item) => item.label === choice);
+	if (!file) return;
+	openAssociatedFile(file.path);
+	ctx.ui.notify(`Opened ${file.label}`, "info");
+}
+
+function openAssociatedFile(filePath: string): void {
+	const command = process.platform === "darwin" ? "open" : process.platform === "win32" ? "cmd" : "xdg-open";
+	const args = process.platform === "win32" ? ["/c", "start", "", filePath] : [filePath];
+	const child = spawn(command, args, { detached: true, stdio: "ignore" });
+	child.unref();
 }
 
 function refreshStatus(ctx: ExtensionContext, config: HeadroomConfig, state: HeadroomRuntimeState): void {
