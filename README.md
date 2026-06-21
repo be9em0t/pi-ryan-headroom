@@ -40,12 +40,12 @@ Compression sends conversation context to the proxy, so remote URLs are blocked 
 
 ## Commands
 
-- `/headroom` — show current status and session stats.
+- `/headroom` — open the Headroom controls menu.
+- `/headroom status` — show current status and session stats.
 - `/headroom on` — enable compression and ensure the proxy is running.
 - `/headroom off` — disable compression for this session (the proxy keeps running).
 - `/headroom health` — check / start the proxy and report whether it is online.
 - `/headroom stats` — print the proxy's own `/stats` output.
-- `/headroom-health` — shortcut for `/headroom health`.
 
 The footer shows a compact status (`✓ Headroom -42% (12,345 saved)`) once compression is applied.
 

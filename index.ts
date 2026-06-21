@@ -50,7 +50,7 @@ export default function headroomExtension(pi: ExtensionAPI) {
 	pi.on("context", (event, ctx) => handleContextCompression(runtime, event, ctx));
 
 	pi.registerCommand("headroom", {
-		description: "Headroom token compression. Usage: /headroom [on|off|status|health|stats]",
+		description: "Headroom token compression controls.",
 		getArgumentCompletions(argumentPrefix) {
 			const prefix = argumentPrefix.trim().toLowerCase();
 			return SUBCOMMANDS.filter((command) => command.startsWith(prefix)).map((command) => ({
@@ -58,15 +58,9 @@ export default function headroomExtension(pi: ExtensionAPI) {
 				label: command,
 			}));
 		},
-		handler: async (args, ctx) => handleCommand(runtime, parseSubcommand(args), ctx),
+		handler: async (args, ctx) => handleCommand(runtime, parseSubcommand(args), ctx, args.trim().length === 0),
 	});
 
-	pi.registerCommand("headroom-health", {
-		description: "Check Headroom proxy health",
-		handler: async (_args, ctx) => {
-			await handleCommand(runtime, "health", ctx);
-		},
-	});
 }
 
 function createRuntime(): HeadroomRuntime {
@@ -308,7 +302,27 @@ function isAbortOrTimeoutError(error: unknown): boolean {
 	return candidate.cause !== undefined && candidate.cause !== error && isAbortOrTimeoutError(candidate.cause);
 }
 
-async function handleCommand(runtime: HeadroomRuntime, command: Subcommand, ctx: ExtensionContext): Promise<void> {
+async function handleCommand(
+	runtime: HeadroomRuntime,
+	command: Subcommand,
+	ctx: ExtensionContext,
+	showMenu = false,
+): Promise<void> {
+	if (showMenu) {
+		const choice = await ctx.ui.select("Headroom controls", [
+			renderMenuStatus(runtime),
+			runtime.state.enabled ? "temporary turn off" : "temporary turn on",
+			"health",
+			"proxy stats",
+		]);
+		if (!choice) return;
+		if (choice.startsWith("status")) return handleCommand(runtime, "status", ctx);
+		if (choice === "temporary turn on") return handleCommand(runtime, "on", ctx);
+		if (choice === "temporary turn off") return handleCommand(runtime, "off", ctx);
+		if (choice === "health") return handleCommand(runtime, "health", ctx);
+		if (choice === "proxy stats") return handleCommand(runtime, "stats", ctx);
+		return;
+	}
 	if (command === "on") {
 		runtime.state.enabled = true;
 		runtime.state.offlineWarningShown = false;
@@ -347,6 +361,10 @@ async function handleCommand(runtime: HeadroomRuntime, command: Subcommand, ctx:
 function refreshStatus(ctx: ExtensionContext, config: HeadroomConfig, state: HeadroomRuntimeState): void {
 	if (!ctx.hasUI) return;
 	ctx.ui.setStatus(STATUS_KEY, renderFooterStatus(ctx, config, state));
+}
+
+function renderMenuStatus(runtime: HeadroomRuntime): string {
+	return `status: ${runtime.state.enabled ? "on" : "off"}; default ${runtime.config.enabled ? "on" : "off"}`;
 }
 
 type HeadroomStatusColor = "dim" | "warning" | "success";
